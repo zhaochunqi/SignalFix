@@ -17,11 +17,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.android.internal.telephony.ICarrierConfigLoader
 import com.zhaochunqi.android.signalfix.ui.theme.SignalFixTheme
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
+import com.zhaochunqi.android.signalfix.compat.ICarrierConfigLoaderCompat
 
 class MainActivity : ComponentActivity() {
 
@@ -72,22 +72,43 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     val context = LocalContext.current
     var shizukuStatus by remember { mutableStateOf("检查中...") }
+    var isShizukuRunning by remember { mutableStateOf(false) }
+    var isShizukuGranted by remember { mutableStateOf(false) }
+    
     var thresholdsInput by remember { mutableStateOf("-110,-100,-90,-80") } // Default example
     var selectedSubId by remember { mutableIntStateOf(-1) }
     var subInfoList by remember { mutableStateOf<List<SubscriptionInfoCompat>>(emptyList()) }
 
-    LaunchedEffect(Unit) {
+    val checkShizukuState = {
         if (Shizuku.pingBinder()) {
-            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                shizukuStatus = "Shizuku 已运行并授权"
-            } else {
-                shizukuStatus = "Shizuku 已运行但未授权"
-                Shizuku.requestPermission(0)
-            }
+            isShizukuRunning = true
+            isShizukuGranted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            shizukuStatus = if (isShizukuGranted) "Shizuku 已运行并授权" else "Shizuku 已运行但未授权"
         } else {
+            isShizukuRunning = false
+            isShizukuGranted = false
             shizukuStatus = "Shizuku 未运行"
         }
+    }
+
+    DisposableEffect(Unit) {
+        val listener = Shizuku.OnRequestPermissionResultListener { _, _ ->
+            checkShizukuState()
+        }
+        Shizuku.addRequestPermissionResultListener(listener)
+        checkShizukuState()
         
+        // Initial check and request
+        if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+             Shizuku.requestPermission(0)
+        }
+
+        onDispose {
+            Shizuku.removeRequestPermissionResultListener(listener)
+        }
+    }
+
+    LaunchedEffect(Unit) {
         // Load Subs
         if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
             val sm = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
@@ -101,8 +122,21 @@ fun MainScreen() {
         }
     }
 
-    Column(modifier = Modifier.padding(16.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding() // Fix: Avoid status bar overlap
+            .padding(16.dp)
+    ) {
         Text("状态: $shizukuStatus", style = MaterialTheme.typography.bodyLarge)
+        
+        if (isShizukuRunning && !isShizukuGranted) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = { Shizuku.requestPermission(0) }) {
+                Text("请求 Shizuku 授权")
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         Text("选择 SIM 卡:", style = MaterialTheme.typography.titleMedium)
@@ -147,12 +181,12 @@ fun MainScreen() {
                     val thresholds = thresholdsInput.split(",").map { it.trim().toInt() }.toIntArray()
                     applyConfig(selectedSubId, thresholds)
                     Toast.makeText(context, "应用成功!", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Toast.makeText(context, "应用失败: ${e.message}", Toast.LENGTH_LONG).show()
+                } catch (e: Throwable) {
+                    Toast.makeText(context, "应用失败: ${e.toString()}", Toast.LENGTH_LONG).show()
                     e.printStackTrace()
                 }
             },
-            enabled = Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            enabled = isShizukuRunning && isShizukuGranted
         ) {
             Text("应用修复")
         }
@@ -168,12 +202,12 @@ fun MainScreen() {
                 try {
                     clearConfig(selectedSubId)
                     Toast.makeText(context, "清除成功!", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Toast.makeText(context, "清除失败: ${e.message}", Toast.LENGTH_LONG).show()
+                } catch (e: Throwable) {
+                    Toast.makeText(context, "清除失败: ${e.toString()}", Toast.LENGTH_LONG).show()
                 }
             },
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-             enabled = Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+             enabled = isShizukuRunning && isShizukuGranted
         ) {
             Text("清除/重置配置")
         }
@@ -183,19 +217,23 @@ fun MainScreen() {
 data class SubscriptionInfoCompat(val id: Int, val displayName: String)
 
 fun applyConfig(subId: Int, thresholds: IntArray) {
-    val binder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("carrier_config_loader"))
-    val loader = ICarrierConfigLoader.Stub.asInterface(binder)
+    val systemService = SystemServiceHelper.getSystemService("carrier_config") 
+        ?: throw IllegalStateException("无法获取 carrier_config 服务 (Shizuku 连接正常?)")
+        
+    val binder = ShizukuBinderWrapper(systemService)
     
     val bundle = PersistableBundle().apply {
         putIntArray(CarrierConfigManager.KEY_5G_NR_SSRSRP_THRESHOLDS_INT_ARRAY, thresholds)
     }
     
-    loader.overrideConfig(subId, bundle)
+    ICarrierConfigLoaderCompat.overrideConfig(binder, subId, bundle)
 }
 
 fun clearConfig(subId: Int) {
-    val binder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("carrier_config_loader"))
-    val loader = ICarrierConfigLoader.Stub.asInterface(binder)
+    val systemService = SystemServiceHelper.getSystemService("carrier_config")
+        ?: throw IllegalStateException("无法获取 carrier_config 服务 (Shizuku 连接正常?)")
+
+    val binder = ShizukuBinderWrapper(systemService)
     
-    loader.overrideConfig(subId, null)
+    ICarrierConfigLoaderCompat.overrideConfig(binder, subId, null)
 }
