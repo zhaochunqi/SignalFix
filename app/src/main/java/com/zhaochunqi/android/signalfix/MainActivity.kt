@@ -11,6 +11,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -159,6 +161,27 @@ fun MainScreen() {
 
         Spacer(modifier = Modifier.height(16.dp))
         
+        Text("预设配置 (点击应用到输入框):", style = MaterialTheme.typography.labelMedium)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val presets = mapOf(
+                "三星" to "-115,-105,-95,-85",
+                "OPPO" to "-120,-113,-105,-97",
+                "VIVO" to "-115,-110,-105,-97",
+                "华为" to "-120,-113,-103,-90"
+            )
+            presets.forEach { (name, value) ->
+                OutlinedButton(onClick = { thresholdsInput = value }) {
+                    Text(name)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
         Text("KEY_5G_NR_SSRSRP_THRESHOLDS_INT_ARRAY", style = MaterialTheme.typography.labelMedium)
         OutlinedTextField(
             value = thresholdsInput,
