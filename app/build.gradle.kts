@@ -5,14 +5,12 @@ plugins {
 
 android {
     namespace = "com.zhaochunqi.android.signalfix"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.zhaochunqi.android.signalfix"
         minSdk = 30
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -34,6 +32,7 @@ android {
     }
     buildFeatures {
         compose = true
+        aidl = true
     }
 }
 
@@ -53,4 +52,8 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // Shizuku
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }
